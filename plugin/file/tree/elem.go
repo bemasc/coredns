@@ -97,5 +97,13 @@ func (e *Elem) Delete(rr dns.RR) {
 	delete(e.m, t)
 }
 
+func (e *Elem) WithName(name string) *Elem {
+	m := make(map[uint16][]dns.RR, len(e.m))
+	for t := range e.m {
+		m[t] = e.TypeForWildcard(t, name)
+	}
+	return &Elem{name: name, m: m}
+}
+
 // Less is a tree helper function that calls less.
 func Less(a *Elem, name string) int { return less(name, a.Name()) }

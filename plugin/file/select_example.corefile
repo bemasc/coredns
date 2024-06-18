@@ -1,0 +1,10 @@
+example.com:8053 tls://example.com:8853 {
+    metadata
+    geoip plugin/geoip/realdata/GeoLite2-Country.mmdb {
+        edns-subnet
+    }
+    protocol_metadata
+    file plugin/file/select_example.zone
+    log
+    errors
+}

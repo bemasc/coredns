@@ -80,11 +80,19 @@ func (g GeoIP) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.Msg) (
 func (g GeoIP) Metadata(ctx context.Context, state request.Request) context.Context {
 	srcIP := net.ParseIP(state.IP())
 
+	ednsScope := 0
 	if g.edns0 {
 		if o := state.Req.IsEdns0(); o != nil {
 			for _, s := range o.Option {
 				if e, ok := s.(*dns.EDNS0_SUBNET); ok {
 					srcIP = e.Address
+
+					// Nothing here uses the prefix length. To be spec-compliant, we
+					// must therefore return the maximum possible prefix length.
+					ednsScope = 128
+					if e.Family == 1 {
+						ednsScope = 32
+					}
 					break
 				}
 			}
@@ -98,7 +106,7 @@ func (g GeoIP) Metadata(ctx context.Context, state request.Request) context.Cont
 			log.Debugf("Setting up metadata failed due to database lookup error: %v", err)
 			return ctx
 		}
-		g.setCityMetadata(ctx, data)
+		g.setCityMetadata(ctx, data, ednsScope)
 	}
 	return ctx
 }

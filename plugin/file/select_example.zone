@@ -1,0 +1,59 @@
+$TTL    3600
+@                    IN  SOA   ns.example.com. contact.example.com. (
+                                               2019121301 ; serial
+                                               1d ; refresh
+                                               2h ; retry
+                                               4w ; expire
+                                               1h ; nxdomain ttl
+                                              )
+                     IN  NS  ns.example.com.
+
+;; Toy example: example.com and protocols.example.com respond
+;; differently depending on the query protocol.
+;; Notable behaviors:
+;;  * Default selection
+;;  * Sharing of base names by multiple owner names.
+;;  * Multiple QTYPEs affected.
+
+@                    IN  A 192.0.2.1
+@                    IN  TXT "udp (default)"
+@                    IN  SELECT "protocol_metadata/name" protocols A TXT
+
+protocols            IN  SELECT "protocol_metadata/name" protocols A TXT
+tcp.protocols        IN  A 192.0.2.2
+                     IN  TXT "tcp"
+tls.protocols        IN  A 192.0.2.3
+                     IN  TXT "tls"
+
+;; Simple example: randomized answers.  Notable behaviors:
+;;  * Selector's behavior depends on the available options.
+;;  * Wildcard owner names for selectors.
+;;  * Multiple SELECT records for different QTYPEs
+
+cointoss             IN  SELECT "@random" cointoss TXT
+head.cointoss        IN  TXT "head"
+tail.cointoss        IN  TXT "tail"
+
+*.combined           IN  SELECT "@random" cointoss TXT
+*.combined           IN  SELECT "protocol_metadata/name" protocols A
+*.combined           IN  A 192.0.2.4
+
+;; Realistic example: Geotargeted answers
+
+where                IN  SELECT "geoip/continent/code" continent TXT AAAA
+where                IN  TXT "Unknown"
+where                IN  AAAA 2001:db8::1
+af.continent         IN  TXT "Africa"
+af.continent         IN  AAAA 2001:db8::2
+an.continent         IN  TXT "Antarctica"
+an.continent         IN  AAAA 2001:db8::3
+as.continent         IN  TXT "Asia"
+as.continent         IN  AAAA 2001:db8::4
+eu.continent         IN  TXT "Europe"
+eu.continent         IN  AAAA 2001:db8::5
+na.continent         IN  TXT "North America"
+na.continent         IN  AAAA 2001:db8::6
+oc.continent         IN  TXT "Oceania"
+oc.continent         IN  AAAA 2001:db8::7
+sa.continent         IN  TXT "South America"
+sa.continent         IN  AAAA 2001:db8::8

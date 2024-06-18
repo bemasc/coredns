@@ -22,6 +22,8 @@ type Zone struct {
 	Apex
 	Expired bool
 
+	selectors map[SelectorKey]Selector
+
 	sync.RWMutex
 
 	StartupOnce  sync.Once
@@ -175,4 +177,38 @@ func (z *Zone) nameFromRight(qname string, i int) (string, bool) {
 		}
 	}
 	return qname[k:], false
+}
+
+// RefreshSelectors recomputes z.selectors.  It must be called
+// whenever the zone has changed.
+func (z *Zone) RefreshSelectors() {
+	z.selectors = make(map[SelectorKey]Selector)
+	all := z.All()
+
+	// This is O(# records * # SELECT records).  It could be made
+	// much faster with smarter tree walking.
+	for _, elem := range all {
+		for _, rr := range elem.Type(dns.TypeSELECT) {
+			s := rr.(*dns.SELECT)
+			key := NewSelectorKey(*s)
+			if _, found := z.selectors[key]; found {
+				continue
+			}
+			var options []string
+			suffix := "." + s.Base // FIXME: embedded "."!
+			for _, elem := range all {
+				before, found := strings.CutSuffix(elem.Name(), suffix)
+				if found && !strings.Contains(before, ".") {
+					// FIXME: Check that this handles ENT correctly.
+					options = append(options, before)
+				}
+			}
+			selector := GetSelector(s.Selector, options)
+			if selector != nil {
+				z.selectors[key] = selector
+			} else {
+				log.Errorf("Unknown selector '%s'", s.Selector)
+			}
+		}
+	}
 }

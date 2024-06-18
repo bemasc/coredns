@@ -136,6 +136,7 @@ func Parse(f io.Reader, origin, fileName string, serial int64) (*Zone, error) {
 	z := NewZone(origin, fileName)
 	seenSOA := false
 	for rr, ok := zp.Next(); ok; rr, ok = zp.Next() {
+		log.Infof("Saw record %s", rr.String())
 		if err := zp.Err(); err != nil {
 			return nil, err
 		}
@@ -159,6 +160,8 @@ func Parse(f io.Reader, origin, fileName string, serial int64) (*Zone, error) {
 	if !seenSOA {
 		return nil, fmt.Errorf("file %q has no SOA record for origin %s", fileName, origin)
 	}
+
+	z.RefreshSelectors()
 
 	return z, nil
 }

@@ -1,0 +1,4 @@
+[submodule "plugin/geoip/realdata"]
+	path = plugin/geoip/realdata
+	url = https://github.com/P3TERX/GeoLite.mmdb.git
+	branch = download

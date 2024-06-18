@@ -13,6 +13,7 @@ var Directives = []string{
 	"root",
 	"metadata",
 	"geoip",
+	"protocol_metadata",
 	"cancel",
 	"tls",
 	"timeouts",

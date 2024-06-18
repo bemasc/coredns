@@ -2,6 +2,7 @@ package file
 
 import (
 	"context"
+	"slices"
 
 	"github.com/coredns/coredns/core/dnsserver"
 	"github.com/coredns/coredns/plugin/file/rrutil"
@@ -27,6 +28,66 @@ const (
 	// ServerFailure indicates a server failure during the lookup.
 	ServerFailure
 )
+
+func (z *Zone) getSelector(rr dns.SELECT) Selector {
+	return z.selectors[NewSelectorKey(rr)]
+}
+
+// Returns the selected element, which may be the original
+// (if the selector indicated "default") or nil (if selection failed),
+// and the ECS scope prefix length (0 if ECS was not used).
+func (z *Zone) applySelect(ctx context.Context, state request.Request, qtype uint16, elem *tree.Elem, rrs []dns.RR) (*tree.Elem, uint8) {
+	var s *dns.SELECT
+	for _, rr := range rrs {
+		s = rr.(*dns.SELECT)
+		if slices.Contains(s.TypeBitMap, qtype) {
+			break
+		}
+	}
+	if s == nil {
+		log.Infof("Skipping SELECT: no matching qtype")
+		return elem, 0
+	}
+	selector := z.getSelector(*s)
+	if selector == nil {
+		return nil, 0
+	}
+	criteria := getSelectorCriteria(ctx, state)
+	selection := selector.Select(criteria)
+	if selection.Option == "" {
+		return elem, 0
+	}
+	selectedName := selection.Option + "." + s.Base
+	selectedElem, _ := z.Search(selectedName)
+	if selectedElem == nil {
+		return nil, 0
+	}
+	return selectedElem.WithName(elem.Name()), selection.EcsScopePrefixLength
+}
+
+func (z *Zone) edns(state request.Request, ecsScope uint8) *dns.OPT {
+	reqEdns := state.Req.IsEdns0()
+	if reqEdns == nil {
+		return nil
+	}
+	edns0 := dns.OPT{
+		Hdr: dns.RR_Header{Name: ".", Rrtype: dns.TypeOPT},
+	}
+	for _, opt := range reqEdns.Option {
+		if opt.Option() == dns.EDNS0SUBNET {
+			reqEcs := opt.(*dns.EDNS0_SUBNET)
+			respEcs := &dns.EDNS0_SUBNET{
+				Code:          dns.EDNS0SUBNET,
+				Family:        reqEcs.Family,
+				SourceNetmask: reqEcs.SourceNetmask,
+				SourceScope:   ecsScope,
+				Address:       reqEcs.Address,
+			}
+			edns0.Option = append(edns0.Option, respEcs)
+		}
+	}
+	return &edns0
+}
 
 // Lookup looks up qname and qtype in the zone. When do is true DNSSEC records are included.
 // Three sets of records are returned, one for the answer, one for authority  and one for the additional section.
@@ -183,6 +244,18 @@ func (z *Zone) Lookup(ctx context.Context, state request.Request, qname string) 
 			return z.externalLookup(ctx, state, elem, rrs)
 		}
 
+		// By default, assume answers apply globally.
+		var ecsScope uint8 = 0
+
+		if rrs := elem.Type(dns.TypeSELECT); len(rrs) > 0 && qtype != dns.TypeSELECT {
+			log.Infof("Found SELECT for %s", elem.Name())
+			elem, ecsScope = z.applySelect(ctx, state, qtype, elem, rrs)
+			if elem == nil {
+				log.Errorf("SELECT failed (%s, %d)", qname, qtype)
+				return nil, nil, nil, ServerFailure
+			}
+		}
+
 		rrs := elem.Type(qtype)
 
 		// NODATA
@@ -198,6 +271,11 @@ func (z *Zone) Lookup(ctx context.Context, state request.Request, qname string) 
 		// Additional section processing for MX, SRV. Check response and see if any of the names are in bailiwick -
 		// if so add IP addresses to the additional section.
 		additional := z.additionalProcessing(rrs, do)
+
+		edns := z.edns(state, ecsScope)
+		if edns != nil {
+			additional = append(additional, edns)
+		}
 
 		if do {
 			sigs := elem.Type(dns.TypeRRSIG)
@@ -222,6 +300,16 @@ func (z *Zone) Lookup(ctx context.Context, state request.Request, qname string) 
 			return z.externalLookup(ctx, state, wildElem, rrs)
 		}
 
+		var ecsScope uint8 = 0
+		if rrs := wildElem.TypeForWildcard(dns.TypeSELECT, qname); len(rrs) > 0 && qtype != dns.TypeSELECT {
+			log.Infof("Found wildcard SELECT for %s", wildElem.Name())
+			wildElem, ecsScope = z.applySelect(ctx, state, qtype, wildElem, rrs)
+			if wildElem == nil {
+				log.Errorf("Wildcard SELECT failed (%s, %d)", qname, qtype)
+				return nil, nil, nil, ServerFailure
+			}
+		}
+
 		rrs := wildElem.TypeForWildcard(qtype, qname)
 
 		// NODATA response.
@@ -232,6 +320,13 @@ func (z *Zone) Lookup(ctx context.Context, state request.Request, qname string) 
 				ret = append(ret, nsec...)
 			}
 			return nil, ret, nil, NoData
+		}
+
+		additional := z.additionalProcessing(rrs, do)
+
+		edns := z.edns(state, ecsScope)
+		if edns != nil {
+			additional = append(additional, edns)
 		}
 
 		auth := ap.ns(do)
@@ -246,7 +341,7 @@ func (z *Zone) Lookup(ctx context.Context, state request.Request, qname string) 
 			sigs = rrutil.SubTypeSignature(sigs, qtype)
 			rrs = append(rrs, sigs...)
 		}
-		return rrs, auth, nil, Success
+		return rrs, auth, additional, Success
 	}
 
 	rcode := NameError
