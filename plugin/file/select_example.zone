@@ -14,6 +14,7 @@ $TTL    3600
 ;;  * Default selection
 ;;  * Sharing of base names by multiple owner names.
 ;;  * Multiple QTYPEs affected.
+;;  * Chaining multiple SELECT records.
 
 @                    IN  A 192.0.2.1
 @                    IN  TXT "udp (default)"
@@ -21,7 +22,9 @@ $TTL    3600
 
 protocols            IN  SELECT "protocol_metadata/name" protocols A TXT
 tcp.protocols        IN  A 192.0.2.2
-                     IN  TXT "tcp"
+tcp.protocols        IN  SELECT "@random" tcp.protocols TXT
+upper.tcp.protocols  IN  TXT "TCP"
+lower.tcp.protocols  IN  TXT "tcp"
 tls.protocols        IN  A 192.0.2.3
                      IN  TXT "tls"
 
